@@ -124,6 +124,10 @@ with tabs[1]:
                 want = st.selectbox(f"想要換成", shift_options, key=f"want_{i}")
             shift_inputs.append((m, curr, want))
 
+            # 非最後一筆時插入淺色分隔線，手機上自動切割段落
+            if i < st.session_state.num_shifts - 1:
+                st.divider()
+
         btn_col1, btn_col2, _ = st.columns([2, 2, 6])
         with btn_col1:
             if st.button("➕ 新增更多月份", use_container_width=True):
