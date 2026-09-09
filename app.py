@@ -71,7 +71,7 @@ with tabs[0]:
     # 底下表格：維持最精簡的 3 欄資訊
     if not filtered_df.empty:
         display_df = filtered_df[["name", "month", "wanted_shift"]].rename(columns={
-            "name": "姓名/代號",
+            "name": "姓名 ",
             "month": "月份",
             "wanted_shift": "希望換成班別"
         })
@@ -88,7 +88,7 @@ with tabs[1]:
         st.success("🎉 刊登成功！以下為您本次新增的換班明細：")
         
         st.write(f"**姓名：** {sub['name']} ｜ **員工編號：** {sub['emp_id']}")
-        st.write(f"**已設定的管理密碼：** `{sub['pin']}` （請牢記，後續修改或下架需使用）")
+        st.write(f"**已設定的密碼：** `{sub['pin']}` （請牢記，後續修改或下架需使用）")
         
         detail_df = pd.DataFrame(sub["records"]).rename(columns={
             "month": "月份", "current_shift": "持有的原始班", "wanted_shift": "希望換成"
@@ -105,7 +105,7 @@ with tabs[1]:
         with col_n:
             name = st.text_input("姓名 *", placeholder="例如：王小明")
         with col_e:
-            emp_id = st.text_input("員工編號 *（當作帳號管理使用）", placeholder="例如：E12345")
+            emp_id = st.text_input("員工編號 *（當作帳號管理使用）", placeholder="例如：a12345")
 
         st.divider()
         st.write("📋 **換班細節設定**")
@@ -115,7 +115,6 @@ with tabs[1]:
         shift_options = ["A班", "E班", "N班"]
 
         for i in range(st.session_state.num_shifts):
-            st.caption(f"項目 #{i + 1}")
             c1, c2, c3 = st.columns(3)
             with c1:
                 m = st.selectbox(f"月份", months_list, key=f"month_{i}")
@@ -136,11 +135,11 @@ with tabs[1]:
                 st.rerun()
 
         st.divider()
-        pin = st.text_input("設定管理密碼（不限長度，供後續編輯/下架使用）*", type="password")
+        pin = st.text_input("設定密碼（不限長度，供後續編輯/下架使用）*", type="password")
 
         if st.button("確認送出刊登", type="primary", use_container_width=True):
             if not name.strip() or not emp_id.strip() or not pin.strip():
-                st.error("請完整填寫姓名、員工編號及管理密碼！")
+                st.error("請完整填寫姓名、員工編號及密碼！")
             else:
                 has_conflict = any(c == w for _, c, w in shift_inputs)
                 if has_conflict:
@@ -217,9 +216,8 @@ with tabs[2]:
 # ----------------- 管理者後台 -----------------
 with tabs[3]:
     st.subheader("🛡️ 系統管理者專案後台")
-    st.info("**欄位說明：**\n- **員工編號**：使用者登入與識別帳號。\n- **同仁密碼 (PIN)**：同仁自訂密碼，若同仁忘記可在此查看或重設。")
 
-    admin_auth = st.text_input("請輸入管理員密碼 (預設 8888)", type="password")
+    admin_auth = st.text_input("請輸入管理員密碼", type="password")
 
     if admin_auth == ADMIN_PIN:
         st.success("管理者驗證成功")
