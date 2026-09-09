@@ -216,3 +216,7 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Streamlit 本機設定與暫存
+.streamlit/
+*.csv
