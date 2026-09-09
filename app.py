@@ -30,50 +30,59 @@ if "last_submission" not in st.session_state:
 
 tabs = st.tabs(["🔍 即時換班看板", "➕ 刊登換班需求", "⚙️ 我的刊登管理", "🛡️ 管理者後台"])
 
-# ----------------- 修改一 & 二：即時換班看板 -----------------
+# ----------------- 即時換班看板（簡潔3欄位 + 班別勾選過濾） -----------------
 with tabs[0]:
     col_t, col_r = st.columns([5, 1])
     with col_t:
-        st.subheader("即時換班看板")
+        st.subheader("即時換班需求")
     with col_r:
         if st.button("🔄 重新整理", use_container_width=True):
             st.rerun()
 
-    # 搜尋與下拉選單篩選
-    c1, c2, c3 = st.columns(3)
-    with c1:
+    # 上層快速條件搜尋
+    col1, col2 = st.columns(2)
+    with col1:
         search_month = st.selectbox("篩選月份", ["全部"] + [f"{i}月" for i in range(1, 13)])
-    with c2:
-        search_curr = st.selectbox("對方持有的原始班（我想換到的班）", ["全部", "A班", "E班", "N班"])
-    with c3:
-        search_want = st.selectbox("對方希望換成的班別", ["全部", "A班", "E班", "N班"])
+    with col2:
+        search_shift = st.selectbox("我想換到的班別（對方的原始班）", ["全部", "A班", "E班", "N班"])
 
+    # 基礎篩選
     filtered_df = df[df["status"] == "刊登中"] if "status" in df.columns else df
 
     if search_month != "全部":
         filtered_df = filtered_df[filtered_df["month"] == search_month]
-    if search_curr != "全部":
-        filtered_df = filtered_df[filtered_df["current_shift"] == search_curr]
-    if search_want != "全部":
-        filtered_df = filtered_df[filtered_df["wanted_shift"] == search_want]
+    if search_shift != "全部":
+        filtered_df = filtered_df[filtered_df["current_shift"] == search_shift]
 
+    st.divider()
+
+    # 表格顯示設定：自訂要顯示的「希望換成班別」
+    selected_target_shifts = st.multiselect(
+        "📌 下方表格只顯示「希望換成」為以下班別的項目（可複選，預設全選）：",
+        options=["A班", "E班", "N班"],
+        default=["A班", "E班", "N班"]
+    )
+
+    if selected_target_shifts:
+        filtered_df = filtered_df[filtered_df["wanted_shift"].isin(selected_target_shifts)]
+    else:
+        filtered_df = filtered_df.iloc[0:0]  # 若全部取消勾選則不顯示
+
+    # 底下表格：維持最精簡的 3 欄資訊
     if not filtered_df.empty:
-        display_df = filtered_df[["name", "month", "current_shift", "wanted_shift", "created_at"]].rename(columns={
+        display_df = filtered_df[["name", "month", "wanted_shift"]].rename(columns={
             "name": "姓名/代號",
             "month": "月份",
-            "current_shift": "持有的原始班",
-            "wanted_shift": "希望換成班別",
-            "created_at": "刊登時間"
+            "wanted_shift": "希望換成班別"
         })
         st.dataframe(display_df, use_container_width=True, hide_index=True)
     else:
         st.info("目前沒有符合條件的換班需求。")
 
-# ----------------- 修改三、四、五：刊登需求與確認畫面 -----------------
+# ----------------- 刊登換班需求 -----------------
 with tabs[1]:
     st.subheader("登記換班需求")
 
-    # 修改三：如果有剛送出的資料，先顯示確認成功畫面
     if st.session_state.last_submission:
         sub = st.session_state.last_submission
         st.success("🎉 刊登成功！以下為您本次新增的換班明細：")
@@ -116,7 +125,6 @@ with tabs[1]:
                 want = st.selectbox(f"想要換成", shift_options, key=f"want_{i}")
             shift_inputs.append((m, curr, want))
 
-        # 修改四：動態增減控制項
         btn_col1, btn_col2, _ = st.columns([2, 2, 6])
         with btn_col1:
             if st.button("➕ 新增更多月份", use_container_width=True):
@@ -128,7 +136,6 @@ with tabs[1]:
                 st.rerun()
 
         st.divider()
-        # 修改五：不限 4 位數密碼
         pin = st.text_input("設定管理密碼（不限長度，供後續編輯/下架使用）*", type="password")
 
         if st.button("確認送出刊登", type="primary", use_container_width=True):
@@ -159,7 +166,6 @@ with tabs[1]:
                     df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
                     save_data(df)
 
-                    # 紀錄至狀態供修改三展示確認畫面
                     st.session_state.last_submission = {
                         "name": name.strip(),
                         "emp_id": emp_id.strip(),
@@ -208,7 +214,7 @@ with tabs[2]:
         else:
             st.error("查無刊登中的項目，或員工編號/密碼輸入錯誤。")
 
-# ----------------- 修改六：管理者後台 -----------------
+# ----------------- 管理者後台 -----------------
 with tabs[3]:
     st.subheader("🛡️ 系統管理者專案後台")
     st.info("**欄位說明：**\n- **員工編號**：使用者登入與識別帳號。\n- **同仁密碼 (PIN)**：同仁自訂密碼，若同仁忘記可在此查看或重設。")
@@ -218,7 +224,6 @@ with tabs[3]:
     if admin_auth == ADMIN_PIN:
         st.success("管理者驗證成功")
 
-        # 重新映射欄位名稱讓後台直覺好懂
         column_labels = {
             "emp_id": "員工編號",
             "name": "同仁姓名",
@@ -244,7 +249,6 @@ with tabs[3]:
         )
 
         if st.button("儲存後台全部異動", type="primary"):
-            # 存回前轉回原本英文欄位
             reverse_labels = {v: k for k, v in column_labels.items()}
             save_data(edited_df.rename(columns=reverse_labels))
             st.success("資料庫已同步更新！")
