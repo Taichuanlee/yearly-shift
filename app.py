@@ -57,22 +57,29 @@ def save_data(df):
     )
 
 def load_config():
+    # 讀取全站系統設定（預設為極簡模式、關閉智慧媒合）
+    default_cfg = {"app_mode": "極簡模式", "enable_matching": False}
     if not HF_TOKEN or not HF_REPO_ID:
         if os.path.exists(CONFIG_FILE):
             cfg = pd.read_csv(CONFIG_FILE)
-            return bool(cfg.iloc[0]["enable_matching"])
-        return False
+            mode = cfg.iloc[0]["app_mode"] if "app_mode" in cfg.columns else "極簡模式"
+            matching = bool(cfg.iloc[0]["enable_matching"]) if "enable_matching" in cfg.columns else False
+            return mode, matching
+        return default_cfg["app_mode"], default_cfg["enable_matching"]
+
     try:
         cfg_path = hf_hub_download(
             repo_id=HF_REPO_ID, filename=CONFIG_FILE, repo_type="dataset", token=HF_TOKEN
         )
         cfg = pd.read_csv(cfg_path)
-        return bool(cfg.iloc[0]["enable_matching"])
+        mode = cfg.iloc[0]["app_mode"] if "app_mode" in cfg.columns else "極簡模式"
+        matching = bool(cfg.iloc[0]["enable_matching"]) if "enable_matching" in cfg.columns else False
+        return mode, matching
     except Exception:
-        return False
+        return default_cfg["app_mode"], default_cfg["enable_matching"]
 
-def save_config(enable_matching: bool):
-    cfg_df = pd.DataFrame([{"enable_matching": enable_matching}])
+def save_config(app_mode: str, enable_matching: bool):
+    cfg_df = pd.DataFrame([{"app_mode": app_mode, "enable_matching": enable_matching}])
     if not HF_TOKEN or not HF_REPO_ID:
         cfg_df.to_csv(CONFIG_FILE, index=False)
         return
@@ -90,25 +97,76 @@ def save_config(enable_matching: bool):
 st.set_page_config(page_title="年度抽班交換看板", layout="wide")
 
 df = load_data()
-enable_matching = load_config()
+current_system_mode, enable_matching = load_config()
 
-# ----------------- 側邊欄：模式切換 -----------------
+# ----------------- 側邊欄：管理員身分驗證 -----------------
 with st.sidebar:
-    st.markdown("### ⚙️ 介面模式切換")
-    mode = st.radio(
-        "選擇顯示模式：",
-        ["🐣 極簡快填模式 (推薦)", "🛡️ 完整管理模式 (原版)"],
-        index=0
-    )
-    st.caption("• **極簡模式**：免密碼免工號，10秒登記與看卡片。\n• **完整模式**：原 4 個分頁、密碼下架與後台。")
+    st.markdown("### 🏥 急診換班許願池")
+    st.caption(f"目前全站運作狀態：**{current_system_mode}**")
+    if st.button("🔄 重新整理資料", use_container_width=True):
+        st.rerun()
+
     st.divider()
-    if st.button("🔄 全站重新整理"):
+    with st.expander("🔑 管理者入口"):
+        admin_pass = st.text_input("輸入管理密碼", type="password", key="side_admin_pass")
+        is_admin = (admin_pass == ADMIN_PIN)
+
+# ==============================================================================
+# 判斷一：若輸入管理員密碼，直接進入管理員後台控制室
+# ==============================================================================
+if is_admin:
+    st.title("🛡️ 系統管理者控制台")
+    st.success("身分驗證通過：管理員權限已啟動")
+
+    # 修改點 2：管理者手動切換全站模式
+    st.markdown("### ⚙️ 全站模式與功能切換")
+    c_m1, c_m2 = st.columns(2)
+    with c_m1:
+        new_mode = st.radio(
+            "設定全站同仁看到的介面：",
+            ["極簡模式", "完整模式"],
+            index=0 if current_system_mode == "極簡模式" else 1
+        )
+    with c_m2:
+        new_enable_matching = st.toggle("開啟完整版「智慧媒合專區」", value=enable_matching)
+
+    if (new_mode != current_system_mode) or (new_enable_matching != enable_matching):
+        if st.button("💾 儲存並套用全站設定", type="primary"):
+            save_config(new_mode, new_enable_matching)
+            st.success(f"已成功將全站模式變更為【{new_mode}】！")
+            st.rerun()
+
+    st.divider()
+    st.markdown("### 📋 全站資料即時維護")
+    column_labels = {
+        "req_id": "系統編號", "emp_id": "員工編號", "name": "同仁姓名",
+        "month": "月份", "current_shift": "持有班別", "wanted_shift": "想要班別",
+        "notes": "備註內容", "pin": "同仁密碼", "status": "刊登狀態", "created_at": "登記時間"
+    }
+
+    edited_df = st.data_editor(
+        df.rename(columns=column_labels),
+        column_config={
+            "刊登狀態": st.column_config.SelectboxColumn("狀態", options=["刊登中", "已下架", "已換出"], required=True),
+            "月份": st.column_config.SelectboxColumn("月份", options=[f"{i}月" for i in range(1, 13)], required=True),
+            "持有班別": st.column_config.SelectboxColumn("持有班", options=["A班", "E班", "N班"], required=True),
+            "想要班別": st.column_config.SelectboxColumn("想要班", options=["A班", "E班", "N班"], required=True),
+        },
+        disabled=["系統編號", "登記時間"],
+        num_rows="dynamic",
+        use_container_width=True
+    )
+
+    if st.button("儲存資料庫全部修改", type="primary"):
+        reverse_labels = {v: k for k, v in column_labels.items()}
+        save_data(edited_df.rename(columns=reverse_labels))
+        st.success("HF Dataset 已同步更新儲存！")
         st.rerun()
 
 # ==============================================================================
-# 模式 A：🐣 極簡臨床模式（單頁流暢、免密碼、免工號）
+# 判斷二：一般同仁畫面 —— 模式 A：🐣 極簡模式（由管理者控制）
 # ==============================================================================
-if mode == "🐣 極簡快填模式 (推薦)":
+elif current_system_mode == "極簡模式":
     st.title("⚡ 快速換班許願池")
     st.caption("簡單 3 步驟：填姓名 ➔ 選月份班別 ➔ 送出。有合適的直接找同事私訊！")
 
@@ -125,7 +183,7 @@ if mode == "🐣 極簡快填模式 (推薦)":
             with c3:
                 s_want = st.selectbox("我想要換成的班 *", ["A班", "E班", "N班"])
             
-            s_note = st.text_input("備註（選填）", placeholder="例如：週末佳、可互貼、私訊我")
+            s_note = st.text_input("備註（選填）", placeholder="例如：某月某月互換、夜班優先、私訊我")
             
             s_submit = st.form_submit_button("🚀 一鍵送出刊登", type="primary", use_container_width=True)
             if s_submit:
@@ -157,45 +215,51 @@ if mode == "🐣 極簡快填模式 (推薦)":
 
     st.divider()
 
-    # 2. 看板區塊
-    st.subheader("📋 現有換班需求")
+    # 2. 修改點 1：極簡模式看板，改為「先選月份與班別」再秀資料
+    st.subheader("📋 查詢現有換班需求")
     
     active_simple = df[df["status"].astype(str).str.strip() == "刊登中"].copy() if "status" in df.columns else df.copy()
+    for col in ["month", "current_shift", "wanted_shift"]:
+        if col in active_simple.columns:
+            active_simple[col] = active_simple[col].astype(str).str.strip()
 
     f_col1, f_col2 = st.columns(2)
     with f_col1:
-        q_month = st.selectbox("📅 篩選月份", ["全部月份"] + [f"{i}月" for i in range(1, 13)])
+        q_month = st.selectbox("📅 選擇欲查詢月份 *", ["-- 請選擇月份 --"] + [f"{i}月" for i in range(1, 13)], index=0)
     with f_col2:
-        q_shift = st.selectbox("🎯 我想換到的班別（對方的持有班）", ["全部班別", "A班", "E班", "N班"])
+        q_shift = st.selectbox("🎯 我想換到的班別（對方的持有班）", ["不限班別", "A班", "E班", "N班"], index=0)
 
-    if q_month != "全部月份":
-        active_simple = active_simple[active_simple["month"] == q_month]
-    if q_shift != "全部班別":
-        active_simple = active_simple[active_simple["current_shift"] == q_shift]
-
-    if not active_simple.empty:
-        st.caption(f"目前有 {len(active_simple)} 筆需求：")
-        for idx, row in active_simple.iterrows():
-            title_text = f"📌 {row['month']}：{row['current_shift']} ➔ 換 {row['wanted_shift']}（{row['name']}）"
-            with st.expander(title_text, expanded=True):
-                ca, cb = st.columns([3, 1])
-                with ca:
-                    st.markdown(f"- **同仁：** {row['name']}")
-                    st.markdown(f"- **備註：** {row['notes'] if pd.notna(row['notes']) and str(row['notes']).strip() else '無特定備註'}")
-                    st.caption(f"刊登時間：{row['created_at']}")
-                with cb:
-                    # 信任制快速下架
-                    if st.button("✅ 標記已換出", key=f"quick_del_{row['req_id']}", help="如果已經跟對方換好班，點此將需求下架"):
-                        r_idx = df[df["req_id"] == row["req_id"]].index
-                        df.loc[r_idx, "status"] = "已換出"
-                        save_data(df)
-                        st.success("已更新為【已換出】！")
-                        st.rerun()
+    # 核心條件：沒選月份時不秀卡片，保持乾淨
+    if q_month == "-- 請選擇月份 --":
+        st.info("💡 請先在上方選擇「欲查詢的月份」，系統將會顯示該月份的換班清單。")
     else:
-        st.info("目前沒有符合條件的換班需求。")
+        filtered_simple = active_simple[active_simple["month"] == q_month]
+        if q_shift != "不限班別":
+            filtered_simple = filtered_simple[filtered_simple["current_shift"] == q_shift]
+
+        if not filtered_simple.empty:
+            st.caption(f"共找到 {len(filtered_simple)} 筆符合條件的需求：")
+            for idx, row in filtered_simple.iterrows():
+                title_text = f"📌 {row['month']}：{row['current_shift']} ➔ 換 {row['wanted_shift']}（{row['name']}）"
+                with st.expander(title_text, expanded=True):
+                    ca, cb = st.columns([3, 1])
+                    with ca:
+                        st.markdown(f"- **同仁：** {row['name']}")
+                        st.markdown(f"- **持有班別：** `{row['current_shift']}` ➔ **想換：** `{row['wanted_shift']}`")
+                        st.markdown(f"- **備註說明：** {row['notes'] if pd.notna(row['notes']) and str(row['notes']).strip() else '無特定備註'}")
+                        st.caption(f"刊登時間：{row['created_at']}")
+                    with cb:
+                        if st.button("✅ 標記已換出", key=f"quick_del_{row['req_id']}", help="如果已經跟對方換好班，點此將需求下架"):
+                            r_idx = df[df["req_id"] == row["req_id"]].index
+                            df.loc[r_idx, "status"] = "已換出"
+                            save_data(df)
+                            st.success("已更新為【已換出】！")
+                            st.rerun()
+        else:
+            st.warning(f"目前【{q_month}】沒有符合條件的換班需求。")
 
 # ==============================================================================
-# 模式 B：🛡️ 完整管理模式（你原先的完整版本，完全保留）
+# 判斷三：一般同仁畫面 —— 模式 B：🛡️ 完整模式（由管理者控制）
 # ==============================================================================
 else:
     st.title("🔄 換班許願看板（完整版）")
@@ -205,7 +269,7 @@ else:
     if "last_submission" not in st.session_state:
         st.session_state.last_submission = None
 
-    tabs = st.tabs(["➕ 刊登換班需求", "🔍 即時換班看板", "⚙️ 我的刊登管理", "🛡️ 管理者後台"])
+    tabs = st.tabs(["➕ 刊登換班需求", "🔍 即時換班看板", "⚙️ 我的刊登管理"])
 
     # 1. 完整刊登
     with tabs[0]:
@@ -325,7 +389,7 @@ else:
                             }
                             st.rerun()
 
-    # 2. 看板
+    # 2. 完整看板
     with tabs[1]:
         col_t, col_r = st.columns([5, 1])
         with col_t:
@@ -469,44 +533,3 @@ else:
                             st.rerun()
             else:
                 st.error("查無刊登中的項目，或員工編號/密碼輸入錯誤。")
-
-    # 4. 管理者後台
-    with tabs[3]:
-        st.subheader("🛡️ 系統管理者專案後台")
-        admin_auth = st.text_input("請輸入管理員密碼", type="password")
-
-        if admin_auth == ADMIN_PIN:
-            st.success("管理者驗證成功")
-            st.markdown("### ⚙️ 系統功能設定")
-            new_enable_matching = st.toggle("開啟首頁「智慧媒合專區」", value=enable_matching)
-            if new_enable_matching != enable_matching:
-                save_config(new_enable_matching)
-                st.success(f"已{'開啟' if new_enable_matching else '關閉'}智慧媒合專區！")
-                st.rerun()
-
-            st.divider()
-            st.markdown("### 📋 全體資料維護")
-            column_labels = {
-                "req_id": "系統編號", "emp_id": "員工編號", "name": "同仁姓名",
-                "month": "月份", "current_shift": "持有班別", "wanted_shift": "想要班別",
-                "notes": "備註內容", "pin": "同仁密碼", "status": "刊登狀態", "created_at": "登記時間"
-            }
-            edited_df = st.data_editor(
-                df.rename(columns=column_labels),
-                column_config={
-                    "刊登狀態": st.column_config.SelectboxColumn("狀態", options=["刊登中", "已下架", "已換出"], required=True),
-                    "月份": st.column_config.SelectboxColumn("月份", options=[f"{i}月" for i in range(1, 13)], required=True),
-                    "持有班別": st.column_config.SelectboxColumn("持有班", options=["A班", "E班", "N班"], required=True),
-                    "想要班別": st.column_config.SelectboxColumn("想要班", options=["A班", "E班", "N班"], required=True),
-                },
-                disabled=["系統編號", "登記時間"],
-                num_rows="dynamic",
-                use_container_width=True
-            )
-            if st.button("儲存後台全部異動", type="primary"):
-                reverse_labels = {v: k for k, v in column_labels.items()}
-                save_data(edited_df.rename(columns=reverse_labels))
-                st.success("資料庫已同步更新儲存！")
-                st.rerun()
-        elif admin_auth:
-            st.error("管理員密碼錯誤！")
