@@ -10,7 +10,7 @@ HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 HF_REPO_ID = st.secrets.get("HF_REPO_ID", "")
 DATA_FILE = "shift_exchange.csv"
 CONFIG_FILE = "system_config.csv"
-ADMIN_PIN = "8888"
+ADMIN_PIN = "117493"
 
 # ----------------- 資料庫與設定讀寫 -----------------
 def load_data():
@@ -173,7 +173,7 @@ elif current_system_mode == "極簡模式":
     # 1. 登記區塊
     with st.expander("➕ 我要刊登換班需求（點此展開填寫）", expanded=True):
         with st.form("simple_form", clear_on_submit=True):
-            s_name = st.text_input("你的姓名或暱稱 *", placeholder="例如：大明 / 怡君學姊")
+            s_name = st.text_input("你的姓名或暱稱 *", placeholder="例如：風詞 / 閔叔")
             
             c1, c2, c3 = st.columns(3)
             with c1:
@@ -249,12 +249,14 @@ elif current_system_mode == "極簡模式":
                         st.markdown(f"- **備註說明：** {row['notes'] if pd.notna(row['notes']) and str(row['notes']).strip() else '無特定備註'}")
                         st.caption(f"刊登時間：{row['created_at']}")
                     with cb:
-                        if st.button("✅ 標記已換出", key=f"quick_del_{row['req_id']}", help="如果已經跟對方換好班，點此將需求下架"):
-                            r_idx = df[df["req_id"] == row["req_id"]].index
-                            df.loc[r_idx, "status"] = "已換出"
-                            save_data(df)
-                            st.success("已更新為【已換出】！")
-                            st.rerun()
+                        with st.popover("✅ 標記已換出", use_container_width=True):
+                            st.caption(f"即將下架 **{row['name']}** 的 {row['month']} 換班需求。")
+                            if st.button("⚠️ 確認已換好並下架", key=f"confirm_del_{row['req_id']}", type="primary", use_container_width=True):
+                                r_idx = df[df["req_id"] == row["req_id"]].index
+                                df.loc[r_idx, "status"] = "已換出"
+                                save_data(df)
+                                st.success("已更新為【已換出】！")
+                                st.rerun()
         else:
             st.warning(f"目前【{q_month}】沒有符合條件的換班需求。")
 
