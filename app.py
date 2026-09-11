@@ -9,17 +9,21 @@ from huggingface_hub import HfApi, hf_hub_download
 HF_TOKEN = st.secrets.get("HF_TOKEN", "")
 HF_REPO_ID = st.secrets.get("HF_REPO_ID", "")
 DATA_FILE = "shift_exchange.csv"
-ADMIN_PIN = "8888"
+ADMIN_PIN = "117493"
 
 # ----------------- HF Dataset 讀寫函式 -----------------
 def load_data():
     empty_df = pd.DataFrame(columns=[
-        "emp_id", "name", "month", "current_shift", "wanted_shift", "notes", "pin", "status", "created_at"
+        "req_id", "emp_id", "name", "month", "current_shift", "wanted_shift", "notes", "pin", "status", "created_at"
     ])
     if not HF_TOKEN or not HF_REPO_ID:
-        # 本地無 Token 時的 fallback 本地 CSV
         if os.path.exists(DATA_FILE):
-            return pd.read_csv(DATA_FILE, dtype={"emp_id": str, "pin": str})
+            df = pd.read_csv(DATA_FILE, dtype={"req_id": str, "emp_id": str, "pin": str})
+            if "req_id" not in df.columns:
+                df["req_id"] = [str(i+1) for i in range(len(df))]
+            if "notes" not in df.columns:
+                df["notes"] = ""
+            return df
         return empty_df
 
     try:
@@ -29,7 +33,9 @@ def load_data():
             repo_type="dataset",
             token=HF_TOKEN
         )
-        df = pd.read_csv(file_path, dtype={"emp_id": str, "pin": str})
+        df = pd.read_csv(file_path, dtype={"req_id": str, "emp_id": str, "pin": str})
+        if "req_id" not in df.columns:
+            df["req_id"] = [str(i+1) for i in range(len(df))]
         if "notes" not in df.columns:
             df["notes"] = ""
         return df
@@ -65,7 +71,7 @@ if "last_submission" not in st.session_state:
 
 tabs = st.tabs(["🔍 即時換班看板", "➕ 刊登換班需求", "⚙️ 我的刊登管理", "🛡️ 管理者後台"])
 
-# ----------------- 1. 即時換班看板（卡片式 UI 方式 B） -----------------
+# ----------------- 1. 即時換班看板 -----------------
 with tabs[0]:
     col_t, col_r = st.columns([5, 1])
     with col_t:
@@ -74,14 +80,76 @@ with tabs[0]:
         if st.button("🔄 重新整理", use_container_width=True):
             st.rerun()
 
+    # ----------------- 自動媒合運算 -----------------
+    active_df = df[df["status"] == "刊登中"] if "status" in df.columns else df
+    matches = []
+    seen_pairs = set()
+
+    if not active_df.empty:
+        records = active_df.to_dict('records')
+        for i in range(len(records)):
+            for j in range(i + 1, len(records)):
+                a = records[i]
+                b = records[j]
+                if (a["month"] == b["month"] and
+                    a["emp_id"] != b["emp_id"] and
+                    a["current_shift"] == b["wanted_shift"] and
+                    b["current_shift"] == a["wanted_shift"]):
+                    pair_key = tuple(sorted([a["req_id"], b["req_id"]]))
+                    if pair_key not in seen_pairs:
+                        seen_pairs.add(pair_key)
+                        matches.append((a, b))
+
+    # 公共看板：預設收起的媒合區塊
+    match_count_text = f"🔥 系統智慧媒合成功 ({len(matches)} 組可互換)" if matches else "🔥 系統智慧媒合專區"
+    with st.expander(match_count_text, expanded=False):
+        if matches:
+            st.caption("以下配對組合雙向需求完全吻合，確認私下講好後，可直接在此輸入任一人密碼完成一鍵下架。")
+            for idx, (user_a, user_b) in enumerate(matches):
+                st.markdown(f"#### 🎯 配對 #{idx + 1}：【{user_a['month']}】")
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.info(
+                        f"👤 **{user_a['name']}**\n\n"
+                        f"- 持有班別：`{user_a['current_shift']}`\n"
+                        f"- 想換班別：`{user_a['wanted_shift']}`\n"
+                        f"- 備註：{user_a['notes'] if user_a['notes'] else '無'}"
+                    )
+                with c2:
+                    st.success(
+                        f"👤 **{user_b['name']}**\n\n"
+                        f"- 持有班別：`{user_b['current_shift']}`\n"
+                        f"- 想換班別：`{user_b['wanted_shift']}`\n"
+                        f"- 備註：{user_b['notes'] if user_b['notes'] else '無'}"
+                    )
+
+                # 做法 B：雙向一鍵換出下架
+                with st.popover(f"🤝 我們講好了，確認換班（下架此組需求）", use_container_width=True):
+                    st.write(f"即將同步將 **{user_a['name']}** 與 **{user_b['name']}** 的 {user_a['month']} 需求標記為「已換出」。")
+                    auth_pin = st.text_input("輸入任一方刊登密碼以核銷：", type="password", key=f"auth_pin_{idx}")
+                    if st.button("確認核銷並下架", key=f"confirm_match_{idx}", type="primary"):
+                        if auth_pin.strip() in [str(user_a["pin"]).strip(), str(user_b["pin"]).strip()]:
+                            idx_a = df[df["req_id"] == user_a["req_id"]].index
+                            idx_b = df[df["req_id"] == user_b["req_id"]].index
+                            df.loc[idx_a, "status"] = "已換出"
+                            df.loc[idx_b, "status"] = "已換出"
+                            save_data(df)
+                            st.success(f"🎉 換班完成！已將 {user_a['name']} 與 {user_b['name']} 的該筆需求同步標記為【已換出】！")
+                            st.rerun()
+                        else:
+                            st.error("密碼不符合任一方設定之密碼！")
+                st.divider()
+        else:
+            st.info("目前尚無雙向完全吻合的需求組合，持續等待好消息！")
+
+    # 上層搜尋條件
     col1, col2 = st.columns(2)
     with col1:
         search_month = st.selectbox("篩選月份", ["全部"] + [f"{i}月" for i in range(1, 13)])
     with col2:
         search_shift = st.selectbox("我想換到的班別（對方的原始班）", ["全部", "A班", "E班", "N班"])
 
-    # 基礎篩選
-    filtered_df = df[df["status"] == "刊登中"] if "status" in df.columns else df
+    filtered_df = active_df.copy()
 
     if search_month != "全部":
         filtered_df = filtered_df[filtered_df["month"] == search_month]
@@ -90,7 +158,6 @@ with tabs[0]:
 
     st.divider()
 
-    # 勾選想要顯示的目標班別
     selected_target_shifts = st.multiselect(
         "📌 篩選希望換成的班別：",
         options=["A班", "E班", "N班"],
@@ -102,7 +169,7 @@ with tabs[0]:
     else:
         filtered_df = filtered_df.iloc[0:0]
 
-    # 卡片式清單渲染（手機友善）
+    # 卡片式手機排版
     if not filtered_df.empty:
         st.caption(f"共找到 {len(filtered_df)} 筆待交換需求：")
         for _, row in filtered_df.iterrows():
@@ -121,7 +188,7 @@ with tabs[0]:
     else:
         st.info("目前沒有符合條件的換班需求。")
 
-# ----------------- 2. 刊登換班需求（含防呆驗證 + 備註欄） -----------------
+# ----------------- 2. 刊登換班需求 -----------------
 with tabs[1]:
     st.subheader("登記換班需求")
 
@@ -145,9 +212,9 @@ with tabs[1]:
     else:
         col_n, col_e = st.columns(2)
         with col_n:
-            name = st.text_input("姓名 *", placeholder="例如：王小明")
+            name = st.text_input("姓名 *", placeholder="例如：郭風詞")
         with col_e:
-            emp_id = st.text_input("員工編號 *（當作帳號管理使用）", placeholder="例如：E12345")
+            emp_id = st.text_input("員工編號 *（當作帳號管理使用）", placeholder="例如：110038")
 
         st.divider()
         st.write("📋 **換班細節設定**")
@@ -165,7 +232,7 @@ with tabs[1]:
             with c3:
                 want = st.selectbox(f"想要換成", shift_options, key=f"want_{i}")
             
-            note = st.text_input(f"備註說明（選填，例如：可互貼/限週末）", key=f"note_{i}")
+            note = st.text_input(f"備註說明（選填，例如：不接受特殊班；1.4月互換）", key=f"note_{i}")
             shift_inputs.append((m, curr, want, note))
 
             if i < st.session_state.num_shifts - 1:
@@ -194,12 +261,10 @@ with tabs[1]:
             elif any(c == w for m, c, w, n in shift_inputs):
                 st.warning("有項目的持有班與想要換成班別相同，請修正！")
             else:
-                # 表單內本身防呆：檢查同一次填寫是否有重複提交完全一樣的項目
                 input_combos = [(m, c, w) for m, c, w, n in shift_inputs]
                 if len(input_combos) != len(set(input_combos)):
                     st.error("您在本次填寫的內容中有完全重複的月份與班別組合，請檢查移除！")
                 else:
-                    # 資料庫重複檢查：防呆同員工已刊登完全一樣的需求
                     duplicate_found = False
                     dup_msg = ""
                     for m, c, w, _ in shift_inputs:
@@ -221,8 +286,11 @@ with tabs[1]:
                         now = datetime.now().strftime("%Y-%m-%d %H:%M")
                         new_rows = []
                         detail_log = []
+                        next_id = int(df["req_id"].astype(int).max() + 1) if not df.empty and df["req_id"].dropna().any() else 1
+                        
                         for m, c, w, n in shift_inputs:
                             row_data = {
+                                "req_id": str(next_id),
                                 "emp_id": clean_emp,
                                 "name": clean_name,
                                 "month": m,
@@ -237,6 +305,7 @@ with tabs[1]:
                             detail_log.append({
                                 "month": m, "current_shift": c, "wanted_shift": w, "notes": n.strip()
                             })
+                            next_id += 1
 
                         df = pd.concat([df, pd.DataFrame(new_rows)], ignore_index=True)
                         save_data(df)
@@ -249,7 +318,7 @@ with tabs[1]:
                         }
                         st.rerun()
 
-# ----------------- 3. 個人管理（員工編號 + 密碼） -----------------
+# ----------------- 3. 個人管理 -----------------
 with tabs[2]:
     st.subheader("管理我的刊登項目")
 
@@ -302,6 +371,7 @@ with tabs[3]:
         st.success("管理者驗證成功")
 
         column_labels = {
+            "req_id": "系統編號",
             "emp_id": "員工編號",
             "name": "同仁姓名",
             "month": "月份",
@@ -316,12 +386,12 @@ with tabs[3]:
         edited_df = st.data_editor(
             df.rename(columns=column_labels),
             column_config={
-                "刊登狀態": st.column_config.SelectboxColumn("狀態", options=["刊登中", "已下架", "已鎖定"], required=True),
+                "刊登狀態": st.column_config.SelectboxColumn("狀態", options=["刊登中", "已下架", "已換出"], required=True),
                 "月份": st.column_config.SelectboxColumn("月份", options=[f"{i}月" for i in range(1, 13)], required=True),
                 "持有班別": st.column_config.SelectboxColumn("持有班", options=["A班", "E班", "N班"], required=True),
                 "想要班別": st.column_config.SelectboxColumn("想要班", options=["A班", "E班", "N班"], required=True),
             },
-            disabled=["登記時間"],
+            disabled=["系統編號", "登記時間"],
             num_rows="dynamic",
             use_container_width=True
         )
