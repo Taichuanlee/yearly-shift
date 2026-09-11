@@ -161,7 +161,7 @@ with tabs[0]:
     selected_target_shifts = st.multiselect(
         "📌 篩選希望換成的班別：",
         options=["A班", "E班", "N班"],
-        default=["A班", "E班", "N班"]
+        default=[]
     )
 
     if selected_target_shifts:
