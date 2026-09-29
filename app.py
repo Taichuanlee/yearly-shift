@@ -17,9 +17,10 @@ def get_tw_now_str(fmt="%Y-%m-%d %H:%M"):
     """取得台灣時區 (Asia/Taipei) 的當前時間格式字串"""
     return datetime.now(ZoneInfo("Asia/Taipei")).strftime(fmt)
 
-# ----------------- 成功提示對話框 -----------------
+# ----------------- 互動式對話框 (Dialogs) -----------------
 @st.dialog("🎉 換班需求已成功刊登！")
 def show_success_dialog(name, month, curr, want, note):
+    st.balloons()
     st.success("您的換班願望已經成功登記到看板囉！")
     st.markdown(f"""
     - **同仁姓名：** `{name}`
@@ -30,6 +31,40 @@ def show_success_dialog(name, month, curr, want, note):
     st.caption("💡 同事若看到合適的班別，會直接找您私訊協調。")
     if st.button("👍 知道了，前往看板查看", type="primary", use_container_width=True):
         st.rerun()
+
+@st.dialog("⚠️ 確認下架此換班需求？")
+def confirm_single_checkout_dialog(req_id, name, month):
+    st.warning(f"您即將把 **{name}** 的 **{month}** 換班需求標記為【已換出】並移出看板。")
+    st.write("請確認雙方是否已協調完畢？下架後該筆需求將不再對外公開。")
+    c_yes, c_no = st.columns(2)
+    with c_yes:
+        if st.button("✅ 確認換好並下架", type="primary", use_container_width=True):
+            r_idx = df[df["req_id"] == str(req_id)].index
+            df.loc[r_idx, "status"] = "已換出"
+            save_data(df)
+            st.success("已更新為【已換出】！")
+            st.rerun()
+    with c_no:
+        if st.button("取消", use_container_width=True):
+            st.rerun()
+
+@st.dialog("⚠️ 確認媒合並同步下架？")
+def confirm_match_checkout_dialog(req_id_a, req_id_b, name_a, name_b, month):
+    st.warning(f"即將同步將 **{name_a}** 與 **{name_b}** 的 **{month}** 換班需求標記為【已換出】。")
+    st.write("請確認雙方同仁皆已同意此互換，下架後雙方的這筆登記將同時封存。")
+    c_yes, c_no = st.columns(2)
+    with c_yes:
+        if st.button("✅ 確認換好並下架", type="primary", use_container_width=True):
+            idx_a = df[df["req_id"] == str(req_id_a)].index
+            idx_b = df[df["req_id"] == str(req_id_b)].index
+            df.loc[idx_a, "status"] = "已換出"
+            df.loc[idx_b, "status"] = "已換出"
+            save_data(df)
+            st.success("🎉 換班完成！已同步標記為【已換出】！")
+            st.rerun()
+    with c_no:
+        if st.button("取消", use_container_width=True):
+            st.rerun()
 
 # ----------------- 資料庫與設定讀寫 -----------------
 def load_data():
@@ -231,14 +266,54 @@ elif current_system_mode == "極簡模式":
 
     st.divider()
 
-    # 2. 極簡模式看板：先選月份與班別再秀資料
-    st.subheader("📋 查詢現有換班需求")
-    
+    # 2. 極簡版：智慧媒合專區（預設收合）
     active_simple = df[df["status"].astype(str).str.strip() == "刊登中"].copy() if "status" in df.columns else df.copy()
-    for col in ["month", "current_shift", "wanted_shift"]:
+    for col in ["month", "current_shift", "wanted_shift", "name"]:
         if col in active_simple.columns:
             active_simple[col] = active_simple[col].astype(str).str.strip()
 
+    matches = []
+    seen_pairs = set()
+    if not active_simple.empty:
+        records = active_simple.to_dict('records')
+        for i in range(len(records)):
+            for j in range(i + 1, len(records)):
+                a = records[i]
+                b = records[j]
+                if (a["month"] == b["month"] and
+                    a["name"] != b["name"] and  # 依姓名區分不同同仁
+                    a["current_shift"] == b["wanted_shift"] and
+                    b["current_shift"] == a["wanted_shift"]):
+                    pair_key = tuple(sorted([a["req_id"], b["req_id"]]))
+                    if pair_key not in seen_pairs:
+                        seen_pairs.add(pair_key)
+                        matches.append((a, b))
+
+    match_title = f"🔥 智慧媒合專區（已找到 {len(matches)} 組可互換，點此查看）" if matches else "🔥 智慧媒合專區（目前尚無配對）"
+    
+    with st.expander(match_title, expanded=False):
+        if matches:
+            st.caption("以下配對組合雙方「月份」與「班別」完全吻合，私下講好後可直接下架此組需求：")
+            for idx, (user_a, user_b) in enumerate(matches):
+                st.markdown(f"#### 🎯 配對 #{idx + 1}：【{user_a['month']}】")
+                c1, c2 = st.columns(2)
+                with c1:
+                    st.info(f"👤 **{user_a['name']}**\n\n- 持有：`{user_a['current_shift']}` ➔ 換 `{user_a['wanted_shift']}`\n- 備註：{user_a['notes'] if str(user_a['notes']).strip() else '無'}")
+                with c2:
+                    st.success(f"👤 **{user_b['name']}**\n\n- 持有：`{user_b['current_shift']}` ➔ 換 `{user_b['wanted_shift']}`\n- 備註：{user_b['notes'] if str(user_b['notes']).strip() else '無'}")
+                
+                # 點擊喚起置中二次確認 Dialog
+                if st.button("🤝 我們換好了，下架這組需求", key=f"btn_match_req_{idx}", type="primary", use_container_width=True):
+                    confirm_match_checkout_dialog(user_a["req_id"], user_b["req_id"], user_a["name"], user_b["name"], user_a["month"])
+                st.divider()
+        else:
+            st.info("💡 目前系統中尚無月份與班別雙向完全吻合的需求組合。")
+
+    st.divider()
+
+    # 3. 極簡模式看板：先選月份與班別再秀資料
+    st.subheader("📋 查詢現有換班需求")
+    
     f_col1, f_col2 = st.columns(2)
     with f_col1:
         q_month = st.selectbox("📅 選擇欲查詢月份 *", ["-- 請選擇月份 --"] + [f"{i}月" for i in range(1, 13)], index=0)
@@ -264,14 +339,9 @@ elif current_system_mode == "極簡模式":
                         st.markdown(f"- **備註說明：** {row['notes'] if pd.notna(row['notes']) and str(row['notes']).strip() else '無特定備註'}")
                         st.caption(f"刊登時間：{row['created_at']}")
                     with cb:
-                        with st.popover("✅ 標記已換出", use_container_width=True):
-                            st.caption(f"即將下架 **{row['name']}** 的 {row['month']} 換班需求。")
-                            if st.button("⚠️ 確認已換好並下架", key=f"confirm_del_{row['req_id']}", type="primary", use_container_width=True):
-                                r_idx = df[df["req_id"] == row["req_id"]].index
-                                df.loc[r_idx, "status"] = "已換出"
-                                save_data(df)
-                                st.success("已更新為【已換出】！")
-                                st.rerun()
+                        # 點擊喚起置中二次確認 Dialog
+                        if st.button("✅ 標記已換出", key=f"btn_single_del_{row['req_id']}", use_container_width=True):
+                            confirm_single_checkout_dialog(row["req_id"], row["name"], row["month"])
         else:
             st.warning(f"目前【{q_month}】沒有符合條件的換班需求。")
 
