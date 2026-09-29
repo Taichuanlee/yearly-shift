@@ -3,6 +3,7 @@ import pandas as pd
 import os
 import io
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from huggingface_hub import HfApi, hf_hub_download
 
 # ----------------- 設定與金鑰 -----------------
@@ -11,6 +12,10 @@ HF_REPO_ID = st.secrets.get("HF_REPO_ID", "")
 DATA_FILE = "shift_exchange.csv"
 CONFIG_FILE = "system_config.csv"
 ADMIN_PIN = "117493"
+
+def get_tw_now_str(fmt="%Y-%m-%d %H:%M"):
+    """取得台灣時區 (Asia/Taipei) 的當前時間格式字串"""
+    return datetime.now(ZoneInfo("Asia/Taipei")).strftime(fmt)
 
 # ----------------- 資料庫與設定讀寫 -----------------
 def load_data():
@@ -53,7 +58,7 @@ def save_data(df):
         path_in_repo=DATA_FILE,
         repo_id=HF_REPO_ID,
         repo_type="dataset",
-        commit_message=f"Update shift data: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        commit_message=f"Update shift data: {get_tw_now_str('%Y-%m-%d %H:%M:%S')}"
     )
 
 def load_config():
@@ -118,7 +123,6 @@ if is_admin:
     st.title("🛡️ 系統管理者控制台")
     st.success("身分驗證通過：管理員權限已啟動")
 
-    # 修改點 2：管理者手動切換全站模式
     st.markdown("### ⚙️ 全站模式與功能切換")
     c_m1, c_m2 = st.columns(2)
     with c_m1:
@@ -194,7 +198,7 @@ elif current_system_mode == "極簡模式":
                 else:
                     valid_ids = pd.to_numeric(df["req_id"], errors='coerce').dropna()
                     next_id = str(int(valid_ids.max() + 1)) if not valid_ids.empty else "1"
-                    now = datetime.now().strftime("%Y-%m-%d %H:%M")
+                    now = get_tw_now_str()
                     
                     new_entry = pd.DataFrame([{
                         "req_id": next_id,
@@ -215,7 +219,7 @@ elif current_system_mode == "極簡模式":
 
     st.divider()
 
-    # 2. 修改點 1：極簡模式看板，改為「先選月份與班別」再秀資料
+    # 2. 極簡模式看板：先選月份與班別再秀資料
     st.subheader("📋 查詢現有換班需求")
     
     active_simple = df[df["status"].astype(str).str.strip() == "刊登中"].copy() if "status" in df.columns else df.copy()
@@ -229,7 +233,6 @@ elif current_system_mode == "極簡模式":
     with f_col2:
         q_shift = st.selectbox("🎯 我想換到的班別（對方的持有班）", ["不限班別", "A班", "E班", "N班"], index=0)
 
-    # 核心條件：沒選月份時不秀卡片，保持乾淨
     if q_month == "-- 請選擇月份 --":
         st.info("💡 請先在上方選擇「欲查詢的月份」，系統將會顯示該月份的換班清單。")
     else:
@@ -359,7 +362,7 @@ else:
                         if duplicate_found:
                             st.error(dup_msg)
                         else:
-                            now = datetime.now().strftime("%Y-%m-%d %H:%M")
+                            now = get_tw_now_str()
                             new_rows = []
                             detail_log = []
                             valid_ids = pd.to_numeric(df["req_id"], errors='coerce').dropna()
