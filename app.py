@@ -17,6 +17,20 @@ def get_tw_now_str(fmt="%Y-%m-%d %H:%M"):
     """取得台灣時區 (Asia/Taipei) 的當前時間格式字串"""
     return datetime.now(ZoneInfo("Asia/Taipei")).strftime(fmt)
 
+# ----------------- 成功提示對話框 -----------------
+@st.dialog("🎉 換班需求已成功刊登！")
+def show_success_dialog(name, month, curr, want, note):
+    st.success("您的換班願望已經成功登記到看板囉！")
+    st.markdown(f"""
+    - **同仁姓名：** `{name}`
+    - **欲換月份：** `{month}`
+    - **班別交換：** 持有 `{curr}` ➔ 想換 `{want}`
+    - **備註內容：** {note if note else '無'}
+    """)
+    st.caption("💡 同事若看到合適的班別，會直接找您私訊協調。")
+    if st.button("👍 知道了，前往看板查看", type="primary", use_container_width=True):
+        st.rerun()
+
 # ----------------- 資料庫與設定讀寫 -----------------
 def load_data():
     empty_df = pd.DataFrame(columns=[
@@ -62,7 +76,6 @@ def save_data(df):
     )
 
 def load_config():
-    # 讀取全站系統設定（預設為極簡模式、關閉智慧媒合）
     default_cfg = {"app_mode": "極簡模式", "enable_matching": False}
     if not HF_TOKEN or not HF_REPO_ID:
         if os.path.exists(CONFIG_FILE):
@@ -174,7 +187,7 @@ elif current_system_mode == "極簡模式":
     st.title("⚡ 快速換班許願池")
     st.caption("簡單 3 步驟：填姓名 ➔ 選月份班別 ➔ 送出。有合適的直接找同事私訊！")
 
-    # 1. 登記區塊（無 form，按 Enter 選字不噴出）
+    # 1. 登記區塊
     with st.expander("➕ 我要刊登換班需求（點此展開填寫）", expanded=True):
         s_name = st.text_input("你的姓名或暱稱 *", placeholder="例如：風詞 / 閔叔")
         
@@ -189,7 +202,9 @@ elif current_system_mode == "極簡模式":
         s_note = st.text_input("備註（選填）", placeholder="例如：某月某月互換、夜班優先、私訊我")
         
         if st.button("🚀 一鍵送出刊登", type="primary", use_container_width=True):
-            if not s_name.strip():
+            clean_n = s_name.strip()
+            clean_note = s_note.strip()
+            if not clean_n:
                 st.error("請輸入姓名或暱稱！")
             elif s_curr == s_want:
                 st.warning("持有班別與想要換的班別不能一樣喔！")
@@ -201,19 +216,18 @@ elif current_system_mode == "極簡模式":
                 new_entry = pd.DataFrame([{
                     "req_id": next_id,
                     "emp_id": "無",
-                    "name": s_name.strip(),
+                    "name": clean_n,
                     "month": s_month,
                     "current_shift": s_curr,
                     "wanted_shift": s_want,
-                    "notes": s_note.strip(),
+                    "notes": clean_note,
                     "pin": "0000",
                     "status": "刊登中",
                     "created_at": now
                 }])
                 df = pd.concat([df, new_entry], ignore_index=True)
                 save_data(df)
-                st.success("🎉 刊登成功！已同步至下方看板。")
-                st.rerun()
+                show_success_dialog(clean_n, s_month, s_curr, s_want, clean_note)
 
     st.divider()
 
