@@ -289,11 +289,17 @@ elif current_system_mode == "極簡模式":
                         seen_pairs.add(pair_key)
                         matches.append((a, b))
 
+    # 🔥 依 1月 ~ 12月 進行精準數字排序
+    matches.sort(
+        key=lambda pair: int("".join(filter(str.isdigit, str(pair[0].get("month", "99"))))) 
+        if any(c.isdigit() for c in str(pair[0].get("month", ""))) else 99
+    )
+
     match_title = f"🔥 智慧媒合專區（已找到 {len(matches)} 組可互換，點此查看）" if matches else "🔥 智慧媒合專區（目前尚無配對）"
     
     with st.expander(match_title, expanded=False):
         if matches:
-            st.caption("以下配對組合雙方「月份」與「班別」完全吻合，私下講好後可直接下架此組需求：")
+            st.caption("以下配對組合雙方「月份」與「班別」完全吻合，已按月份順序排列。私下講好後可直接下架此組需求：")
             for idx, (user_a, user_b) in enumerate(matches):
                 st.markdown(f"#### 🎯 配對 #{idx + 1}：【{user_a['month']}】")
                 c1, c2 = st.columns(2)
