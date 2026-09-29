@@ -156,7 +156,7 @@ if is_admin:
             "持有班別": st.column_config.SelectboxColumn("持有班", options=["A班", "E班", "N班"], required=True),
             "想要班別": st.column_config.SelectboxColumn("想要班", options=["A班", "E班", "N班"], required=True),
         },
-        disabled=["系統編號", "登記時間"],
+        disabled=["系統編號"],
         num_rows="dynamic",
         use_container_width=True
     )
