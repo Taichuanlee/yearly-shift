@@ -174,48 +174,46 @@ elif current_system_mode == "極簡模式":
     st.title("⚡ 快速換班許願池")
     st.caption("簡單 3 步驟：填姓名 ➔ 選月份班別 ➔ 送出。有合適的直接找同事私訊！")
 
-    # 1. 登記區塊
+    # 1. 登記區塊（無 form，按 Enter 選字不噴出）
     with st.expander("➕ 我要刊登換班需求（點此展開填寫）", expanded=True):
-        with st.form("simple_form", clear_on_submit=True):
-            s_name = st.text_input("你的姓名或暱稱 *", placeholder="例如：風詞 / 閔叔")
-            
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                s_month = st.selectbox("月份 *", [f"{i}月" for i in range(1, 13)])
-            with c2:
-                s_curr = st.selectbox("我手上的原始班 *", ["A班", "E班", "N班"])
-            with c3:
-                s_want = st.selectbox("我想要換成的班 *", ["A班", "E班", "N班"])
-            
-            s_note = st.text_input("備註（選填）", placeholder="例如：某月某月互換、夜班優先、私訊我")
-            
-            s_submit = st.form_submit_button("🚀 一鍵送出刊登", type="primary", use_container_width=True)
-            if s_submit:
-                if not s_name.strip():
-                    st.error("請輸入姓名或暱稱！")
-                elif s_curr == s_want:
-                    st.warning("持有班別與想要換的班別不能一樣喔！")
-                else:
-                    valid_ids = pd.to_numeric(df["req_id"], errors='coerce').dropna()
-                    next_id = str(int(valid_ids.max() + 1)) if not valid_ids.empty else "1"
-                    now = get_tw_now_str()
-                    
-                    new_entry = pd.DataFrame([{
-                        "req_id": next_id,
-                        "emp_id": "無",
-                        "name": s_name.strip(),
-                        "month": s_month,
-                        "current_shift": s_curr,
-                        "wanted_shift": s_want,
-                        "notes": s_note.strip(),
-                        "pin": "0000",
-                        "status": "刊登中",
-                        "created_at": now
-                    }])
-                    df = pd.concat([df, new_entry], ignore_index=True)
-                    save_data(df)
-                    st.success("🎉 刊登成功！已同步至下方看板。")
-                    st.rerun()
+        s_name = st.text_input("你的姓名或暱稱 *", placeholder="例如：風詞 / 閔叔")
+        
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            s_month = st.selectbox("月份 *", [f"{i}月" for i in range(1, 13)])
+        with c2:
+            s_curr = st.selectbox("我手上的原始班 *", ["A班", "E班", "N班"])
+        with c3:
+            s_want = st.selectbox("我想要換成的班 *", ["A班", "E班", "N班"])
+        
+        s_note = st.text_input("備註（選填）", placeholder="例如：某月某月互換、夜班優先、私訊我")
+        
+        if st.button("🚀 一鍵送出刊登", type="primary", use_container_width=True):
+            if not s_name.strip():
+                st.error("請輸入姓名或暱稱！")
+            elif s_curr == s_want:
+                st.warning("持有班別與想要換的班別不能一樣喔！")
+            else:
+                valid_ids = pd.to_numeric(df["req_id"], errors='coerce').dropna()
+                next_id = str(int(valid_ids.max() + 1)) if not valid_ids.empty else "1"
+                now = get_tw_now_str()
+                
+                new_entry = pd.DataFrame([{
+                    "req_id": next_id,
+                    "emp_id": "無",
+                    "name": s_name.strip(),
+                    "month": s_month,
+                    "current_shift": s_curr,
+                    "wanted_shift": s_want,
+                    "notes": s_note.strip(),
+                    "pin": "0000",
+                    "status": "刊登中",
+                    "created_at": now
+                }])
+                df = pd.concat([df, new_entry], ignore_index=True)
+                save_data(df)
+                st.success("🎉 刊登成功！已同步至下方看板。")
+                st.rerun()
 
     st.divider()
 
